@@ -1,0 +1,193 @@
+{
+  "name": "LinkedIn invitation acceptor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "a6a6e46c-ebaa-414b-9ce1-d25bd4d1cfe0",
+      "name": "Every 3 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ea8832c4-377e-4470-af85-413ec69c5a51",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// CONFIG: your LinkedIn account ID, and the time the bot goes live.\n// Only connection requests sent after acceptSentAfter are accepted.\n// Use your local time with the +02:00 offset, for example '2026-11-06T11:00:00+02:00'.\nreturn [{ json: {\n  accountId: 'acc_01m6r29ejtecs8vwp9vpxxnsr7',\n  acceptSentAfter: '2026-11-06T11:00:00+02:00',\n} }];\n"
+      },
+      "id": "55918dae-f001-4fa0-813a-fad7900a0235",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.unipile.com/v2/{{ $json.accountId }}/users/me/relation-requests?type=received",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 25000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        }
+      },
+      "id": "8480e212-0a97-4e45-9e71-0c7bfc761ad6",
+      "name": "List received invitations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Unipile API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_PER_RUN = 10;\nconst { accountId, acceptSentAfter } = $('Config').first().json;\nconst cutoff = acceptSentAfter ? new Date(acceptSentAfter).getTime() : 0;\nconst inputs = $input.all().map((item) => item.json);\nconst first = inputs[0] || {};\nconst list = Array.isArray(first.items) ? first.items\n  : Array.isArray(first.data) ? first.data\n  : Array.isArray(first.requests) ? first.requests\n  : first.id ? inputs\n  : [];\n\n// Skip requests sent before the bot went live. Requests without a date are accepted.\nconst isNew = (request) => {\n  const sentAt = new Date(request.created_at || 0).getTime();\n  return !cutoff || !sentAt || sentAt >= cutoff;\n};\n\nreturn list.filter(isNew).slice(0, MAX_PER_RUN).map((request) => ({ json: {\n  accountId,\n  requestId: request.id || request.request_id || request.invitation_id,\n  name: request.user?.display_name || request.user?.first_name || '',\n  sentAt: request.created_at || '',\n} })).filter((item) => item.json.requestId);\n"
+      },
+      "id": "33169c3a-9c27-4284-825f-3bf3bd276877",
+      "name": "Prepare invitations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.unipile.com/v2/{{ $json.accountId }}/users/me/relation-requests/{{ encodeURIComponent($json.requestId) }}/accept",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 25000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 5000
+            }
+          }
+        }
+      },
+      "id": "ab02787c-9dac-48dd-8276-496e164f7550",
+      "name": "Accept invitation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Unipile API Key"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Every 3 minutes": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "List received invitations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List received invitations": {
+      "main": [
+        [
+          {
+            "node": "Prepare invitations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare invitations": {
+      "main": [
+        [
+          {
+            "node": "Accept invitation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
