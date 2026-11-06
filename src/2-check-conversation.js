@@ -57,10 +57,12 @@ if (!evt.isMock) {
   if (CONFIG.PROTECT_EXISTING_CHATS && !alwaysReply) {
     const startAt = CONFIG.BOT_START_AT ? new Date(CONFIG.BOT_START_AT).getTime() : 0;
     if (startAt && history.some((m) => time(m) < startAt)) return [];
-    const botIds = new Set(store.sent.map((s) => s.messageId).filter(Boolean));
-    const botHashes = new Set(store.sent.map((s) => s.hash));
-    const tiaWroteHere = history.some((m) => m.isSender && !botIds.has(m.id) && !botHashes.has(hash(m.text)));
-    if (tiaWroteHere) return [];
+    // Skip chats where Tia wrote before the bot ever replied here (existing personal chats).
+    // Messages from Tia's account after the bot's first reply are the bot's own replies.
+    const botTimes = store.sent.filter((s) => s.chatId === evt.chatId).map((s) => s.at);
+    const firstBotReplyAt = botTimes.length ? Math.min(...botTimes) - 60 * 1000 : Infinity;
+    const tiaWroteBefore = history.some((m) => m.isSender && time(m) < firstBotReplyAt);
+    if (tiaWroteBefore) return [];
   }
 }
 
